@@ -23,6 +23,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @Slf4j
@@ -64,7 +65,7 @@ public class ImageServiceImpl implements ImgService {
         ImageEntity image = new ImageEntity();
         image.setImageUrl(imgurUrl);
         image.setUser(user);
-        image.setDeleteHash(res.getData().getId());
+        image.setDeleteHash(res.getData().getDeletehash());
         imageRepository.save(image);
     }
 
@@ -74,10 +75,10 @@ public class ImageServiceImpl implements ImgService {
             ImageEntity image = imageRepository.findById(imageId)
                     .orElseThrow(() -> new CustomException("Image not found with the Image Id : " + imageId, "IMG_NOT_FOUND"));
 
-//            log.info("Deleting image from Imgur API with url: {}", image.getImageUrl());
-//            deleteImageFromService(image.getImageUrl(), image.getDeleteHash());
+            log.info("Deleting image from Imgur API with delete hash: {}", image.getDeleteHash());
+            deleteImageFromService(image.getDeleteHash());
 
-            log.info("Deleting image from repo with url: {}", image.getImageUrl());
+            log.info("Deleting image from repo with image ID: {}", imageId);
             imageRepository.delete(image);
         } catch (CustomException e) {
             log.error("Error during image deletion: {}", e.getMessage(), e);
@@ -88,25 +89,40 @@ public class ImageServiceImpl implements ImgService {
         }
     }
 
-    private void deleteImageFromService(String imageUrl, String accessToken) {
+    private void deleteImageFromService(String deleteHash) {
         try {
             HttpHeaders headers = new HttpHeaders();
-//            headers.set("Authorization", "Client-ID " + clientId);
+            headers.set("Authorization", "Client-ID " + clientId);
 
-//            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-//            body.add("image", file.getResource());
-
-//            HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
             HttpEntity<String> requestEntity = new HttpEntity<>(headers);
-            String deleteEndPoint = deleteUrl + "/" + accessToken;
-            new RestTemplate().exchange(
+            String deleteEndPoint = "https://api.imgur.com/3/image/" + deleteHash;
+
+            log.info("Sending delete request to Imgur API: {}", deleteEndPoint);
+
+            ResponseEntity<Map> response = new RestTemplate().exchange(
                     deleteEndPoint,
                     HttpMethod.DELETE,
                     requestEntity,
-                    Void.class
+                    Map.class
             );
+
+            if (response.getStatusCode() == HttpStatus.OK) {
+                Map<String, Object> body = response.getBody();
+                if (body != null && Boolean.TRUE.equals(body.get("success"))) {
+                    log.info("Image deleted successfully from Imgur.", body);
+                } else {
+                    throw new CustomException("Imgur API deletion failed: " + body, "IMG_DELETION_ERROR");
+                }
+            } else {
+                throw new CustomException("Imgur API deletion failed with status: " + response.getStatusCode(), "IMG_DELETION_ERROR");
+            }
+
         } catch (HttpClientErrorException e) {
+            log.error("HttpClientErrorException during image deletion: {}", e.getMessage(), e);
             throw new CustomException("Image deletion failed: " + e.getMessage(), "IMG_DELETION_ERROR");
+        } catch (Exception e) {
+            log.error("Unexpected error during image deletion: {}", e.getMessage(), e);
+            throw new CustomException("An unexpected error occurred during image deletion", "UNEXPECTED_ERROR");
         }
     }
 
